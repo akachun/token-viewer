@@ -1,0 +1,13 @@
+# macOS / Swift
+.DS_Store
+.build/
+.swiftpm/
+dist/
+*.xcodeproj/xcuserdata/
+
+# Windows / .NET (also covered by windows/.gitignore)
+bin/
+obj/
+.vs/
+*.user
+TestResults/
