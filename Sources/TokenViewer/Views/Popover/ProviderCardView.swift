@@ -89,9 +89,10 @@ struct ProviderCardView: View {
                 .background(Color.orange.opacity(0.08))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             } else if snapshot.authStatus.isAuthenticated && snapshot.windows.isEmpty && !snapshot.isLoading {
-                Text("표시할 쿼터 윈도우가 없습니다.")
+                Text(snapshot.notice ?? "표시할 쿼터 윈도우가 없습니다.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(12)

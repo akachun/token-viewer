@@ -70,32 +70,71 @@ final class ClaudeProvider: UsageProvider {
         }
 
         let orgs = try parseOrganizations(data: orgData)
-        guard let primaryOrg = orgs.first(where: { $0.capabilities?.contains("chat") == true }) ?? orgs.first else {
-            throw ProviderError.notAuthenticated
+        guard !orgs.isEmpty else { throw ProviderError.notAuthenticated }
+
+        // Team / Enterprise members usually belong to several organizations (personal + company).
+        // Prefer the one selected in claude.ai (lastActiveOrg cookie), then try the rest until one reports windows.
+        let cookies = await WebSessionBridge.shared.cookies(matching: "claude.ai")
+        let lastActive = cookies.first { $0.name == "lastActiveOrg" }?.value
+        let candidates = Array(orderOrganizations(orgs, lastActiveOrg: lastActive).prefix(5))
+
+        // 2. Fetch usage windows: first organization that reports any
+        var fallback: ProviderUsageSnapshot?
+        var firstError: Error?
+        for org in candidates {
+            do {
+                let usageResp = try await WebSessionBridge.shared.fetch(
+                    origin: origin,
+                    pathOrURL: "/api/organizations/\(org.uuid)/usage",
+                    headers: [
+                        "Accept": "application/json",
+                        "anthropic-client-platform": "web_claude_ai"
+                    ]
+                )
+                if usageResp.status == 429 { throw ProviderError.rateLimited }
+                if usageResp.status == 401 || usageResp.status == 403 {
+                    throw ProviderError.sessionExpired("HTTP \(usageResp.status)")
+                }
+                guard (200...299).contains(usageResp.status),
+                      let usageData = usageResp.body.data(using: .utf8) else {
+                    throw ProviderError.networkError("HTTP \(usageResp.status)")
+                }
+                let snap = try parseClaudeUsage(data: usageData, org: org)
+                if !snap.windows.isEmpty { return snap }
+                if fallback == nil { fallback = snap }
+            } catch ProviderError.rateLimited {
+                throw ProviderError.rateLimited
+            } catch {
+                // A company org may refuse /usage for members; keep trying other orgs.
+                if firstError == nil { firstError = error }
+            }
         }
 
-        // 2. Fetch usage windows for the active organization
-        let usageResp = try await WebSessionBridge.shared.fetch(
-            origin: origin,
-            pathOrURL: "/api/organizations/\(primaryOrg.uuid)/usage",
-            headers: [
-                "Accept": "application/json",
-                "anthropic-client-platform": "web_claude_ai"
-            ]
-        )
+        if var fallback {
+            let names = candidates.map { $0.name ?? formatTierName($0.rateLimitTier) ?? String($0.uuid.prefix(8)) }
+                .joined(separator: ", ")
+            fallback.notice = "\(fallback.planName ?? "이 조직")은(는) 고정 사용량 한도(5시간/주간)를 제공하지 않습니다. "
+                + "Enterprise·사용량 기반 플랜이면 관리자 콘솔에서 확인하세요. (확인한 조직: \(names))"
+            return fallback
+        }
+        throw firstError ?? ProviderError.notAuthenticated
+    }
 
-        if usageResp.status == 401 || usageResp.status == 403 {
-            throw ProviderError.sessionExpired("HTTP \(usageResp.status)")
+    /// lastActiveOrg first, then chat-capable orgs (paid tiers before free), then the rest.
+    private func orderOrganizations(_ orgs: [Organization], lastActiveOrg: String?) -> [Organization] {
+        func rank(_ o: Organization) -> (Int, Int, Int) {
+            let active = (lastActiveOrg != nil && o.uuid.caseInsensitiveCompare(lastActiveOrg!) == .orderedSame) ? 0 : 1
+            let chat = o.capabilities?.contains("chat") == true ? 0 : 1
+            let tier = o.rateLimitTier ?? ""
+            let free = (tier.isEmpty || tier.lowercased().contains("free")) ? 1 : 0
+            return (active, chat, free)
         }
-        if usageResp.status == 429 {
-            throw ProviderError.rateLimited
-        }
-        guard (200...299).contains(usageResp.status),
-              let usageData = usageResp.body.data(using: .utf8) else {
-            throw ProviderError.networkError("HTTP \(usageResp.status)")
-        }
-
-        return try parseClaudeUsage(data: usageData, org: primaryOrg)
+        return orgs.enumerated()
+            .sorted { a, b in
+                let ra = rank(a.element), rb = rank(b.element)
+                return ra != rb ? ra < rb : a.offset < b.offset
+            }
+            .map(\.element)
     }
 
     // MARK: - Helpers
@@ -132,30 +171,6 @@ final class ClaudeProvider: UsageProvider {
         }
     }
 
-    private struct ClaudeUsageResponse: Decodable {
-        let fiveHour: Bucket?
-        let sevenDay: Bucket?
-        let sevenDaySonnet: Bucket?
-        let sevenDayOpus: Bucket?
-
-        enum CodingKeys: String, CodingKey {
-            case fiveHour = "five_hour"
-            case sevenDay = "seven_day"
-            case sevenDaySonnet = "seven_day_sonnet"
-            case sevenDayOpus = "seven_day_opus"
-        }
-
-        struct Bucket: Decodable {
-            let utilization: Double?
-            let resetsAt: String?
-
-            enum CodingKeys: String, CodingKey {
-                case utilization
-                case resetsAt = "resets_at"
-            }
-        }
-    }
-
     private func parseOrganizations(data: Data) throws -> [Organization] {
         do {
             return try JSONDecoder().decode([Organization].self, from: data)
@@ -164,40 +179,50 @@ final class ClaudeProvider: UsageProvider {
         }
     }
 
+    private static let knownBuckets: [(id: String, label: String)] = [
+        ("five_hour", "5시간 세션"),
+        ("seven_day", "7일 주간 한도"),
+        ("seven_day_sonnet", "Sonnet 주간"),
+        ("seven_day_opus", "Opus 주간"),
+        ("seven_day_oauth_apps", "앱 연동 주간"),
+        ("extra_usage", "추가 사용량 (월)")
+    ]
+
+    /// Every top-level object with a numeric `utilization` becomes a window, so buckets that only some plans
+    /// return (Team/Enterprise extras) are shown too. Known buckets come first.
     private func parseClaudeUsage(data: Data, org: Organization) throws -> ProviderUsageSnapshot {
-        let decoded: ClaudeUsageResponse
-        do {
-            decoded = try JSONDecoder().decode(ClaudeUsageResponse.self, from: data)
-        } catch {
-            throw ProviderError.parsingError(error.localizedDescription)
+        guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            throw ProviderError.parsingError("빈 응답")
         }
 
-        let allUtils = [
-            decoded.fiveHour?.utilization,
-            decoded.sevenDay?.utilization,
-            decoded.sevenDaySonnet?.utilization,
-            decoded.sevenDayOpus?.utilization
-        ].compactMap { $0 }
+        struct Bucket { let id: String; let label: String; let util: Double; let resetsAt: String? }
+        func order(_ id: String) -> Int { Self.knownBuckets.firstIndex { $0.id == id } ?? Int.max }
+
+        let buckets: [Bucket] = root.compactMap { key, value in
+            guard let obj = value as? [String: Any] else { return nil }
+            let util: Double?
+            if let n = obj["utilization"] as? NSNumber, !(n is Bool) { util = n.doubleValue }
+            else if let str = obj["utilization"] as? String { util = Double(str) }
+            else { util = nil }
+            guard let util else { return nil }
+            let label = Self.knownBuckets.first { $0.id == key }?.label
+                ?? key.replacingOccurrences(of: "seven_day", with: "주간")
+                    .replacingOccurrences(of: "five_hour", with: "5시간")
+                    .replacingOccurrences(of: "_", with: " ")
+                    .trimmingCharacters(in: .whitespaces)
+            return Bucket(id: key, label: label, util: util, resetsAt: obj["resets_at"] as? String)
+        }
+        .sorted { (order($0.id), $0.id) < (order($1.id), $1.id) }
 
         // If any bucket is > 1.0, the API is returning 0...100 percentage values.
         // If all values are 0...1 and at least one is fractional (0 < v < 1), it's 0...1 fraction scale.
         // Otherwise (e.g. integers 0 or 1), default to 0...100 percentage scale (Claude's standard format).
+        let allUtils = buckets.map(\.util)
         let isFractionScale = !allUtils.contains(where: { $0 > 1.0 })
             && allUtils.contains(where: { $0 > 0.0 && $0 < 1.0 })
 
-        var windows: [UsageWindow] = []
-
-        if let fiveHour = decoded.fiveHour, let util = fiveHour.utilization {
-            windows.append(makeWindow(id: "five_hour", label: "5시간 세션", utilization: util, isFractionScale: isFractionScale, resetsAt: fiveHour.resetsAt))
-        }
-        if let sevenDay = decoded.sevenDay, let util = sevenDay.utilization {
-            windows.append(makeWindow(id: "seven_day", label: "7일 주간 한도", utilization: util, isFractionScale: isFractionScale, resetsAt: sevenDay.resetsAt))
-        }
-        if let sonnet = decoded.sevenDaySonnet, let util = sonnet.utilization {
-            windows.append(makeWindow(id: "seven_day_sonnet", label: "Sonnet 주간", utilization: util, isFractionScale: isFractionScale, resetsAt: sonnet.resetsAt))
-        }
-        if let opus = decoded.sevenDayOpus, let util = opus.utilization {
-            windows.append(makeWindow(id: "seven_day_opus", label: "Opus 주간", utilization: util, isFractionScale: isFractionScale, resetsAt: opus.resetsAt))
+        let windows = buckets.map {
+            makeWindow(id: $0.id, label: $0.label, utilization: $0.util, isFractionScale: isFractionScale, resetsAt: $0.resetsAt)
         }
 
         let planLabel = formatTierName(org.rateLimitTier) ?? "Claude"
@@ -231,7 +256,8 @@ final class ClaudeProvider: UsageProvider {
         if lower.contains("max_5") || lower.contains("5x") { return "Claude Max (5x)" }
         if lower.contains("max") { return "Claude Max" }
         if lower.contains("pro") { return "Claude Pro" }
-        if lower.contains("team") { return "Claude Team" }
+        if lower.contains("enterprise") { return "Claude Enterprise" }
+        if lower.contains("team") || lower.contains("raven") { return "Claude Team" }
         return tier.replacingOccurrences(of: "_", with: " ").capitalized
     }
 }

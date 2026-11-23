@@ -59,7 +59,8 @@ public class ClaudeParsingTests
     [InlineData("default_claude_max_5x", "Claude Max (5x)")]
     [InlineData("claude_pro", "Claude Pro")]
     [InlineData("claude_team_tier", "Claude Team")]
-    [InlineData("enterprise_custom", "Enterprise Custom")]
+    [InlineData("enterprise_custom", "Claude Enterprise")]
+    [InlineData("special_custom", "Special Custom")]
     [InlineData(null, null)]
     public void FormatTierName(string? tier, string? expected) =>
         Assert.Equal(expected, ClaudeProvider.FormatTierName(tier));

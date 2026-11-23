@@ -48,7 +48,7 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
 
-                    <TextBlock Text="표시할 쿼터 윈도우가 없습니다." Opacity="0.6" FontSize="11" Visibility="{Binding NoWindowsVisibility}" />
+                    <TextBlock Text="{Binding NoWindowsText}" Opacity="0.6" FontSize="11" TextWrapping="Wrap" Visibility="{Binding NoWindowsVisibility}" />
                     <TextBlock Text="{Binding ErrorMessage}" Foreground="#F59E0B" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,4"
                                Visibility="{Binding ErrorVisibility}" />
 

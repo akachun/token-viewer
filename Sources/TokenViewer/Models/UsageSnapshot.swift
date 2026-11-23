@@ -97,6 +97,8 @@ struct ProviderUsageSnapshot: Equatable {
     var lastUpdated: Date?
     var errorMessage: String?
     var isLoading: Bool
+    /// Explanation shown instead of the generic "no quota windows" text (e.g. business plans without fixed limits).
+    var notice: String? = nil
 
     static func empty(for provider: ProviderType) -> ProviderUsageSnapshot {
         ProviderUsageSnapshot(

@@ -82,6 +82,12 @@ public sealed record ProviderUsageSnapshot(
     public static ProviderUsageSnapshot Empty(ProviderType provider) =>
         new(provider, AuthStatus.SignedOut, null, [], null, null, false);
 
+    /// <summary>
+    /// Optional explanation shown instead of the generic "no quota windows" text, e.g. when a business /
+    /// enterprise workspace has no fixed limits or the account belongs to several organizations.
+    /// </summary>
+    public string? Notice { get; init; }
+
     /// <summary>Selects the window to summarize in the tray icon.</summary>
     public UsageWindow? PrimaryDisplayWindow(WindowSelectionStrategy strategy)
     {

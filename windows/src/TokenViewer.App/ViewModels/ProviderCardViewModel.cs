@@ -35,6 +35,7 @@ public sealed class ProviderCardViewModel
             Brush(settings.ColorMode == ColorMode.BrandColor ? p.AccentColor() : HealthColors.For(w, settings.WarningThresholdPercent)),
             w.FormatTimeUntilReset() is { } r ? $"리셋 {r}" : null)).ToList();
         HasNoWindows = IsAuthenticated && Windows.Count == 0 && ErrorMessage is null;
+        NoWindowsText = snapshot.Notice ?? "표시할 쿼터 윈도우가 없습니다.";
 
         LoginCommand = new RelayCommand(() => monitor.StartLogin(p));
         RefreshCommand = new AsyncRelayCommand(() => monitor.RefreshAsync(p));
@@ -56,6 +57,7 @@ public sealed class ProviderCardViewModel
     public string? LastUpdatedText { get; }
     public IReadOnlyList<WindowRowViewModel> Windows { get; }
     public bool HasNoWindows { get; }
+    public string NoWindowsText { get; }
 
     public Visibility LoginVisibility => NeedsLogin ? Visibility.Visible : Visibility.Collapsed;
     public Visibility SignedInVisibility => IsAuthenticated ? Visibility.Visible : Visibility.Collapsed;
