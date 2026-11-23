@@ -207,6 +207,8 @@ public sealed class ClaudeProvider : IUsageProvider
                 DateParser.ParseIso8601(b.ResetsAt)))
             .ToList();
 
+        ApplyExtraUsageAmounts(root, windows);
+
         var planLabel = FormatTierName(org.RateLimitTier) ?? "Claude";
 
         return new ProviderUsageSnapshot(
@@ -217,6 +219,66 @@ public sealed class ClaudeProvider : IUsageProvider
             now,
             null,
             false);
+    }
+
+    public sealed record MoneyAmounts(double Used, double Limit, string? Currency);
+
+    /// <summary>
+    /// Monthly extra-usage spend. Prefers <c>spend.used/limit</c> ({amount_minor, exponent}, self-describing),
+    /// then <c>extra_usage.used_credits/monthly_limit</c> scaled by <c>decimal_places</c> (both are minor units).
+    /// </summary>
+    public static MoneyAmounts? ParseExtraUsageAmounts(JsonObject root)
+    {
+        if (Json.Obj(root["spend"]) is { } spend &&
+            Minor(Json.Obj(spend["used"])) is { } su && Minor(Json.Obj(spend["limit"])) is { } sl)
+            return new(su.Value, sl.Value, su.Currency ?? sl.Currency);
+
+        if (Json.Obj(root["extra_usage"]) is { } extra &&
+            Json.Num(extra["used_credits"]) is { } used && Json.Num(extra["monthly_limit"]) is { } limit)
+        {
+            var scale = Math.Pow(10, Json.Num(extra["decimal_places"]) ?? 2);
+            return new(used / scale, limit / scale, Json.Str(extra["currency"]));
+        }
+        return null;
+
+        static (double Value, string? Currency)? Minor(JsonObject? money)
+        {
+            if (money is null || Json.Num(money["amount_minor"]) is not { } minor) return null;
+            return (minor / Math.Pow(10, Json.Num(money["exponent"]) ?? 2), Json.Str(money["currency"]));
+        }
+    }
+
+    /// <summary>Adds "($640.92/$700)" to the extra-usage window, or creates it from <c>spend</c> alone.</summary>
+    private static void ApplyExtraUsageAmounts(JsonObject root, List<UsageWindow> windows)
+    {
+        if (ParseExtraUsageAmounts(root) is not { } money) return;
+        var extra = Json.Obj(root["extra_usage"]);
+        var reached = extra?["spend_limit_reached"]?.GetValueKind() == JsonValueKind.True;
+        var label = $"추가 사용량 (월) {FormatMoney(money.Used, money.Currency)}/{FormatMoney(money.Limit, money.Currency)}";
+
+        var idx = windows.FindIndex(w => w.Id == "extra_usage");
+        if (idx >= 0)
+        {
+            windows[idx] = windows[idx] with { Label = label, RemainingFraction = reached ? 0 : windows[idx].RemainingFraction };
+        }
+        else if (money.Limit > 0)
+        {
+            var remaining = reached ? 0 : Math.Clamp(1.0 - money.Used / money.Limit, 0.0, 1.0);
+            windows.Add(new UsageWindow("extra_usage", label, remaining, null));
+        }
+    }
+
+    public static string FormatMoney(double amount, string? currency)
+    {
+        var number = amount.ToString("#,0.##", System.Globalization.CultureInfo.InvariantCulture);
+        return currency?.ToUpperInvariant() switch
+        {
+            null or "" => number,
+            "USD" => $"${number}",
+            "EUR" => $"€{number}",
+            "KRW" => $"₩{number}",
+            var c => $"{number} {c}",
+        };
     }
 
     private static string HumanizeBucket(string key) =>

@@ -126,6 +126,54 @@ public class ClaudeBusinessTests
     }
 }
 
+public class ClaudeExtraUsageTests
+{
+    private static readonly ClaudeOrganization Org = new("o", "Corp", "default_claude_enterprise", ["chat"]);
+
+    // Shape reported from a Claude Enterprise org: same $640.92 / $700 budget in two encodings.
+    private const string Json = """
+        {"five_hour":null,"seven_day":null,
+         "extra_usage":{"is_enabled":true,"monthly_limit":70000,"used_credits":64092.0,"utilization":91.56,
+           "currency":"USD","decimal_places":2,"spend_limit_reached":false,"daily":null,"weekly":null},
+         "spend":{"used":{"amount_minor":64092,"currency":"USD","exponent":2},
+           "limit":{"amount_minor":70000,"currency":"USD","exponent":2},"percent":92,"severity":"critical",
+           "cap":{"money":null,"credits":{"amount_minor":70000,"exponent":2}},"balance":null}}
+        """;
+
+    [Fact]
+    public void ExtraUsage_ShowsDollarAmounts_Once()
+    {
+        var snap = ClaudeProvider.ParseUsage(Json, Org, DateTimeOffset.Now);
+
+        var w = Assert.Single(snap.Windows);
+        Assert.Equal("extra_usage", w.Id);
+        Assert.Equal("추가 사용량 (월) $640.92/$700", w.Label);
+        Assert.Equal(8, w.RemainingPercent); // 91.56% used
+    }
+
+    [Fact]
+    public void ExtraUsageOnly_UsesDecimalPlaces()
+    {
+        var root = (System.Text.Json.Nodes.JsonObject)System.Text.Json.Nodes.JsonNode.Parse(
+            """{"extra_usage":{"monthly_limit":5000,"used_credits":1234,"currency":"USD","decimal_places":2}}""")!;
+        Assert.Equal(new ClaudeProvider.MoneyAmounts(12.34, 50, "USD"), ClaudeProvider.ParseExtraUsageAmounts(root));
+    }
+
+    [Fact]
+    public void SpendOnly_CreatesWindow_AndLimitReachedIsZero()
+    {
+        var snap = ClaudeProvider.ParseUsage(
+            """{"spend":{"used":{"amount_minor":500,"currency":"USD","exponent":2},"limit":{"amount_minor":1000,"currency":"USD","exponent":2}}}""",
+            Org, DateTimeOffset.Now);
+        Assert.Equal(50, Assert.Single(snap.Windows).RemainingPercent);
+
+        var reached = ClaudeProvider.ParseUsage(
+            """{"extra_usage":{"utilization":99,"spend_limit_reached":true,"monthly_limit":100,"used_credits":99}}""",
+            Org, DateTimeOffset.Now);
+        Assert.Equal(0, Assert.Single(reached.Windows).RemainingPercent);
+    }
+}
+
 public class CodexBusinessTests
 {
     private static readonly DateTimeOffset Now = new(2026, 11, 22, 12, 0, 0, TimeSpan.Zero);

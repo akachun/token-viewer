@@ -221,9 +221,10 @@ final class ClaudeProvider: UsageProvider {
         let isFractionScale = !allUtils.contains(where: { $0 > 1.0 })
             && allUtils.contains(where: { $0 > 0.0 && $0 < 1.0 })
 
-        let windows = buckets.map {
+        var windows = buckets.map {
             makeWindow(id: $0.id, label: $0.label, utilization: $0.util, isFractionScale: isFractionScale, resetsAt: $0.resetsAt)
         }
+        applyExtraUsageAmounts(root: root, windows: &windows)
 
         let planLabel = formatTierName(org.rateLimitTier) ?? "Claude"
 
@@ -236,6 +237,62 @@ final class ClaudeProvider: UsageProvider {
             errorMessage: nil,
             isLoading: false
         )
+    }
+
+    // MARK: - Extra usage (monthly spend)
+
+    private func number(_ value: Any?) -> Double? {
+        if let n = value as? NSNumber, !(n is Bool) { return n.doubleValue }
+        if let s = value as? String { return Double(s) }
+        return nil
+    }
+
+    /// Prefers `spend.used/limit` ({amount_minor, exponent}), then `extra_usage.used_credits/monthly_limit`
+    /// scaled by `decimal_places` (both are minor currency units).
+    private func extraUsageAmounts(root: [String: Any]) -> (used: Double, limit: Double, currency: String?)? {
+        func minor(_ value: Any?) -> (Double, String?)? {
+            guard let m = value as? [String: Any], let amount = number(m["amount_minor"]) else { return nil }
+            return (amount / pow(10, number(m["exponent"]) ?? 2), m["currency"] as? String)
+        }
+        if let spend = root["spend"] as? [String: Any],
+           let used = minor(spend["used"]), let limit = minor(spend["limit"]) {
+            return (used.0, limit.0, used.1 ?? limit.1)
+        }
+        if let extra = root["extra_usage"] as? [String: Any],
+           let used = number(extra["used_credits"]), let limit = number(extra["monthly_limit"]) {
+            let scale = pow(10, number(extra["decimal_places"]) ?? 2)
+            return (used / scale, limit / scale, extra["currency"] as? String)
+        }
+        return nil
+    }
+
+    private func applyExtraUsageAmounts(root: [String: Any], windows: inout [UsageWindow]) {
+        guard let money = extraUsageAmounts(root: root) else { return }
+        let reached = (root["extra_usage"] as? [String: Any])?["spend_limit_reached"] as? Bool == true
+        let label = "추가 사용량 (월) \(formatMoney(money.used, money.currency))/\(formatMoney(money.limit, money.currency))"
+        if let idx = windows.firstIndex(where: { $0.id == "extra_usage" }) {
+            let w = windows[idx]
+            windows[idx] = UsageWindow(id: w.id, label: label, remainingFraction: reached ? 0 : w.remainingFraction, resetsAt: w.resetsAt)
+        } else if money.limit > 0 {
+            let remaining = reached ? 0 : max(0, min(1, 1 - money.used / money.limit))
+            windows.append(UsageWindow(id: "extra_usage", label: label, remainingFraction: remaining, resetsAt: nil))
+        }
+    }
+
+    private func formatMoney(_ amount: Double, _ currency: String?) -> String {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.locale = Locale(identifier: "en_US")
+        f.minimumFractionDigits = 0
+        f.maximumFractionDigits = 2
+        let n = f.string(from: NSNumber(value: amount)) ?? "\(amount)"
+        switch currency?.uppercased() {
+        case nil, "": return n
+        case "USD": return "$\(n)"
+        case "EUR": return "€\(n)"
+        case "KRW": return "₩\(n)"
+        case let c?: return "\(n) \(c)"
+        }
     }
 
     private func makeWindow(id: String, label: String, utilization: Double, isFractionScale: Bool, resetsAt: String?) -> UsageWindow {
