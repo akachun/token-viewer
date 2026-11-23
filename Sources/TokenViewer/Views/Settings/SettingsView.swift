@@ -56,7 +56,7 @@ struct SettingsView: View {
                     Text("TokenViewer")
                         .fontWeight(.semibold)
                     Spacer()
-                    Text("v1.0.0")
+                    Text("v\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?")")
                         .foregroundStyle(.secondary)
                 }
                 Text("Codex, Claude, Gemini 구독 잔여량을 macOS 메뉴바에서 독립적으로 모니터링합니다.")
