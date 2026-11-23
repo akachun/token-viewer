@@ -118,6 +118,37 @@ public class SettingsTests
     }
 
     [Fact]
+    public void WidgetSettings_DefaultOn_PersistPosition_AndRepairOpacity()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "tv-tests-" + Guid.NewGuid().ToString("N"));
+        var path = Path.Combine(dir, "settings.json");
+        try
+        {
+            // Settings written by v1.0.x have no widget keys: the widget starts enabled at the default spot.
+            Directory.CreateDirectory(dir);
+            File.WriteAllText(path, """{"displayStyle":"ring"}""");
+            var s = new SettingsStore(path).Load();
+            Assert.True(s.WidgetEnabled);
+            Assert.Null(s.WidgetLeft);
+
+            s.WidgetLeft = 1200;
+            s.WidgetTop = 40;
+            s.WidgetEnabled = false;
+            var reloaded = new SettingsStore(path).Load();
+            Assert.Equal(1200, reloaded.WidgetLeft);
+            Assert.Equal(40, reloaded.WidgetTop);
+            Assert.False(reloaded.WidgetEnabled);
+
+            File.WriteAllText(path, """{"widgetOpacity":0.05}""");
+            Assert.Equal(0.9, new SettingsStore(path).Load().WidgetOpacity);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
     public void KeyValueStore_PersistsTypedValues()
     {
         var path = Path.Combine(Path.GetTempPath(), "tv-state-" + Guid.NewGuid().ToString("N") + ".json");

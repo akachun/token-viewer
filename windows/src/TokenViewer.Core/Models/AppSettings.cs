@@ -96,6 +96,15 @@ public sealed partial class AppSettings : ObservableObject
     [ObservableProperty] private bool launchAtLogin;
     [ObservableProperty] private bool demoModeEnabled;
 
+    /// <summary>Always-on-top floating widget with each provider's key quota (Windows only).</summary>
+    [ObservableProperty] private bool widgetEnabled = true;
+
+    /// <summary>Saved widget position in DIPs; null places it above the notification area.</summary>
+    [ObservableProperty] private double? widgetLeft;
+    [ObservableProperty] private double? widgetTop;
+
+    [ObservableProperty] private double widgetOpacity = 0.9;
+
     [JsonIgnore]
     public IReadOnlyList<ProviderType> OrderedVisibleProviders =>
         ProviderOrder.Where(VisibleProviders.Contains).ToList();
@@ -141,6 +150,8 @@ public sealed partial class AppSettings : ObservableObject
             RefreshIntervalSeconds = 300;
         if (WarningThresholdPercent is <= 0 or > 100)
             WarningThresholdPercent = 20;
+        if (double.IsNaN(WidgetOpacity) || WidgetOpacity is < 0.3 or > 1.0)
+            WidgetOpacity = 0.9;
     }
 
     private static List<ProviderType> Toggle(List<ProviderType> source, ProviderType p, bool on)

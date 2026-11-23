@@ -103,6 +103,19 @@
                               SelectedValue="{Binding Settings.ColorMode}" Margin="0,0,0,12" />
 
                     <CheckBox Content="원형 게이지 안에 퍼센트 수치 표시 (끄면 AI 약자 표시)" IsChecked="{Binding Settings.ShowPercentInIcon}" />
+
+                    <TextBlock Text="플로팅 위젯" FontSize="15" FontWeight="SemiBold" Margin="0,24,0,8" />
+                    <CheckBox Content="항상 위에 떠 있는 미니 위젯 표시" IsChecked="{Binding Settings.WidgetEnabled}" />
+                    <TextBlock Opacity="0.6" FontSize="11" Margin="0,2,0,8" TextWrapping="Wrap"
+                               Text="끌어서 이동, 더블클릭하면 상세 팝업, 우클릭하면 투명도·숨기기 메뉴가 열립니다." />
+                    <DockPanel Margin="0,0,0,4">
+                        <TextBlock DockPanel.Dock="Right" Text="{Binding WidgetOpacityText}" FontWeight="SemiBold" />
+                        <TextBlock Text="위젯 불투명도" />
+                    </DockPanel>
+                    <Slider Minimum="0.3" Maximum="1" TickFrequency="0.05" IsSnapToTickEnabled="True"
+                            Value="{Binding Settings.WidgetOpacity}" />
+                    <Button Content="위젯 위치 초기화" Command="{Binding ResetWidgetPositionCommand}" Padding="10,3"
+                            HorizontalAlignment="Left" Margin="0,8,0,0" />
                 </StackPanel>
             </ScrollViewer>
         </TabItem>
@@ -147,7 +160,7 @@
                     <CheckBox Content="데모 데이터 모드 (로그인 없이 UI/알림 테스트)" IsChecked="{Binding Settings.DemoModeEnabled}" />
 
                     <TextBlock Text="정보" FontSize="15" FontWeight="SemiBold" Margin="0,24,0,4" />
-                    <TextBlock Text="TokenViewer for Windows v1.0.0" />
+                    <TextBlock Text="{Binding VersionText}" />
                     <TextBlock Opacity="0.7" TextWrapping="Wrap"
                                Text="Codex, Claude, Gemini 구독 잔여량을 Windows 작업 표시줄 트레이에서 독립적으로 모니터링합니다." />
                 </StackPanel>

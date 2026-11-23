@@ -42,6 +42,19 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     public string ThresholdText => $"{Settings.WarningThresholdPercent}% 이하";
 
+    public string WidgetOpacityText => $"{Math.Round(Settings.WidgetOpacity * 100)}%";
+
+    public string VersionText =>
+        $"TokenViewer for Windows v{typeof(SettingsViewModel).Assembly.GetName().Version?.ToString(3) ?? "?"}";
+
+    [RelayCommand]
+    private void ResetWidgetPosition()
+    {
+        Settings.WidgetLeft = null;
+        Settings.WidgetTop = null;
+        Settings.WidgetEnabled = true;
+    }
+
     public string DisplayStyleDescription =>
         DisplayStyles.FirstOrDefault(o => o.Value == Settings.DisplayStyle)?.Description ?? "";
 
@@ -67,6 +80,8 @@ public sealed partial class SettingsViewModel : ObservableObject
         if (e.PropertyName is nameof(AppSettings.ProviderOrder) or nameof(AppSettings.VisibleProviders) or nameof(AppSettings.NotifiedProviders))
             RebuildRows();
         if (e.PropertyName == nameof(AppSettings.WarningThresholdPercent)) OnPropertyChanged(nameof(ThresholdText));
+        if (e.PropertyName == nameof(AppSettings.WidgetOpacity)) OnPropertyChanged(nameof(WidgetOpacityText));
+        if (e.PropertyName is nameof(AppSettings.WidgetLeft) or nameof(AppSettings.WidgetTop)) return;
         if (e.PropertyName == nameof(AppSettings.DisplayStyle)) OnPropertyChanged(nameof(DisplayStyleDescription));
         RenderPreviews();
     }

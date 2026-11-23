@@ -20,6 +20,7 @@ public partial class App : Application
     private UsageMonitorViewModel? _monitor;
     private TrayIconManager? _tray;
     private PopupWindow? _popup;
+    private FloatingWidget? _widget;
     private SettingsWindow? _settingsWindow;
     private Window? _loginWindow;
 
@@ -63,6 +64,8 @@ public partial class App : Application
 
         _popup = new PopupWindow(_monitor, OpenSettings, Quit);
         _tray = new TrayIconManager(_monitor, () => _popup.Toggle(), OpenSettings, Quit);
+        _widget = new FloatingWidget(_monitor, () => _popup.Toggle(), OpenSettings);
+        _widget.SyncVisibility();
 
         _monitor.Notify = msg => _tray.ShowNotification(msg);
         _monitor.RequestLogin = PresentLogin;
@@ -155,6 +158,7 @@ public partial class App : Application
 
     private void Quit()
     {
+        _widget?.CloseForExit();
         _tray?.Dispose();
         _bridge?.Dispose();
         Shutdown();

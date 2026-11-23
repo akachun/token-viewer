@@ -90,6 +90,10 @@ public sealed class TrayIconManager : IDisposable
         var menu = new ContextMenu();
         menu.Items.Add(MenuItem("지금 새로고침", async () => await _monitor.RefreshAllAsync()));
         menu.Items.Add(MenuItem("설정...", _openSettings));
+        var widgetItem = new MenuItem { Header = "플로팅 위젯 표시", IsCheckable = true };
+        menu.Opened += (_, _) => widgetItem.IsChecked = _settings.WidgetEnabled;
+        widgetItem.Click += (_, _) => _settings.WidgetEnabled = widgetItem.IsChecked;
+        menu.Items.Add(widgetItem);
         menu.Items.Add(new Separator());
         menu.Items.Add(MenuItem("TokenViewer 종료", _quit));
         return menu;
@@ -106,6 +110,9 @@ public sealed class TrayIconManager : IDisposable
     {
         if (e.PropertyName is nameof(AppSettings.ProviderOrder) or nameof(AppSettings.VisibleProviders))
             Rebuild();
+        else if (e.PropertyName is nameof(AppSettings.WidgetEnabled) or nameof(AppSettings.WidgetLeft)
+                 or nameof(AppSettings.WidgetTop) or nameof(AppSettings.WidgetOpacity))
+            return;
         else
             UpdateAll();
     }
