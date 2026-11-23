@@ -178,6 +178,42 @@ final class CodexProvider: UsageProvider {
             add(group["secondary_window"], id: "\(key).secondary", fallback: "주간", prefix: prefix)
         }
 
+        // Business / Enterprise credit budgets: spend_control.individual_limit (and any other *_limit object).
+        if let spend = root["spend_control"] as? [String: Any] {
+            for key in spend.keys.sorted(by: { ($0 == "individual_limit" ? 0 : 1, $0) < ($1 == "individual_limit" ? 0 : 1, $1) }) {
+                guard let limit = spend[key] as? [String: Any] else { continue }
+                let used = number(limit["used"]), max = number(limit["limit"])
+                var usedFraction: Double
+                if let used, let max, max > 0 { usedFraction = used / max }
+                else if let pct = number(limit["used_percent"]) { usedFraction = pct / 100.0 }
+                else if let rem = number(limit["remaining_percent"]) { usedFraction = 1.0 - rem / 100.0 }
+                else { continue }
+                if limit["reached"] as? Bool == true { usedFraction = 1.0 }
+
+                let unitRaw = limit["unit"] as? String
+                let unit = (unitRaw == nil || unitRaw == "credit" || unitRaw == "credits") ? "크레딧" : unitRaw!
+                let scope = key == "individual_limit"
+                    ? "월간"
+                    : key.replacingOccurrences(of: "_limit", with: "").replacingOccurrences(of: "_", with: " ")
+                var amounts = ""
+                if let used, let max {
+                    let f = NumberFormatter()
+                    f.numberStyle = .decimal
+                    f.maximumFractionDigits = 0
+                    amounts = " (\(f.string(from: NSNumber(value: used)) ?? "")/\(f.string(from: NSNumber(value: max)) ?? ""))"
+                }
+                windows.append(UsageWindow(
+                    id: "spend_\(key)",
+                    label: "\(scope) \(unit) 한도\(amounts)",
+                    remainingFraction: Swift.max(0.0, Swift.min(1.0, 1.0 - usedFraction)),
+                    resetsAt: resolveResetDate(
+                        resetAt: number(limit["reset_at"]),
+                        resetAfter: number(limit["reset_after_seconds"]).map { Int($0) }
+                    )
+                ))
+            }
+        }
+
         let planDisplay = (root["plan_type"] as? String).flatMap { $0.isEmpty ? nil : "ChatGPT \($0.capitalized)" }
 
         var snapshot = ProviderUsageSnapshot(

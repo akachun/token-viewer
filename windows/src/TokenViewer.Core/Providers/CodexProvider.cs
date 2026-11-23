@@ -211,6 +211,16 @@ public sealed class CodexProvider : IUsageProvider
                 windows[i] = w with { Label = $"{GroupLabel(w.Id[..dot])} · {w.Label}" };
         }
 
+        // Business / Enterprise credit budgets: spend_control.individual_limit (and any other *_limit object)
+        // carrying used / limit credits and a monthly reset.
+        if (Json.Obj(root["spend_control"]) is { } spend)
+        {
+            foreach (var (key, node) in spend)
+            {
+                if (node is JsonObject limit && SpendWindow(key, limit, now) is { } w) windows.Add(w);
+            }
+        }
+
         var planType = Json.Str(root["plan_type"]);
         var planDisplay = planType is { Length: > 0 } plan
             ? $"ChatGPT {char.ToUpperInvariant(plan[0])}{plan[1..].ToLowerInvariant()}"
@@ -227,6 +237,34 @@ public sealed class CodexProvider : IUsageProvider
         {
             Notice = windows.Count == 0 ? EmptyNotice(planDisplay, rateLimit, Json.Obj(root["credits"])) : null,
         };
+    }
+
+    internal static UsageWindow? SpendWindow(string key, JsonObject limit, DateTimeOffset now)
+    {
+        var used = Json.Num(limit["used"]);
+        var max = Json.Num(limit["limit"]);
+        double usedFraction;
+        if (used is { } u && max is > 0) usedFraction = u / max.Value;
+        else if (Json.Num(limit["used_percent"]) is { } pct) usedFraction = pct / 100.0;
+        else if (Json.Num(limit["remaining_percent"]) is { } rem) usedFraction = 1.0 - rem / 100.0;
+        else return null;
+        if (limit["reached"]?.GetValueKind() == JsonValueKind.True) usedFraction = 1.0;
+
+        var unit = Json.Str(limit["unit"]) is "credit" or "credits" or null ? "크레딧" : Json.Str(limit["unit"]);
+        var scope = key switch
+        {
+            "individual_limit" => "월간",
+            _ => key.Replace("_limit", "").Replace('_', ' '),
+        };
+        var amounts = used is { } uu && max is { } mm
+            ? $" ({uu.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)}/{mm.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)})"
+            : "";
+
+        return new UsageWindow(
+            $"spend_{key}",
+            $"{scope} {unit} 한도{amounts}",
+            Math.Clamp(1.0 - usedFraction, 0.0, 1.0),
+            ResolveResetDate(Json.Num(limit["reset_at"]), (long?)Json.Num(limit["reset_after_seconds"]), now));
     }
 
     private static string GroupLabel(string key) => key switch

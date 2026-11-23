@@ -206,3 +206,37 @@ public class CodexBusinessTests
         Assert.Null(snap.Notice);
     }
 }
+
+public class CodexSpendControlTests
+{
+    private static readonly DateTimeOffset Now = new(2026, 11, 23, 0, 0, 0, TimeSpan.Zero);
+
+    // Shape reported from a ChatGPT Business workspace (no 5h/weekly windows, monthly credit budget).
+    private const string BusinessJson = """
+        {"plan_type":"business","rate_limit":null,
+         "spend_control":{"reached":false,"individual_limit":{"unit":"credit","limit":"10000","used":"5923.143",
+           "remaining":"4076.857","used_percent":59,"remaining_percent":41,"reset_after_seconds":689351,"reset_at":1796083200}}}
+        """;
+
+    [Fact]
+    public void IndividualLimit_BecomesMonthlyCreditWindow()
+    {
+        var snap = CodexProvider.ParseWhamUsage(BusinessJson, null, Now);
+
+        var w = Assert.Single(snap.Windows);
+        Assert.Equal("spend_individual_limit", w.Id);
+        Assert.Equal("월간 크레딧 한도 (5,923/10,000)", w.Label);
+        Assert.Equal(41, w.RemainingPercent);
+        Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(1796083200), w.ResetsAt);
+        Assert.Null(snap.Notice);
+    }
+
+    [Fact]
+    public void PercentOnly_And_Reached_AreHandled()
+    {
+        var snap = CodexProvider.ParseWhamUsage(
+            """{"spend_control":{"individual_limit":{"used_percent":30},"team_limit":{"used_percent":10,"reached":true}}}""",
+            null, Now);
+        Assert.Equal([70, 0], snap.Windows.Select(w => w.RemainingPercent));
+    }
+}
